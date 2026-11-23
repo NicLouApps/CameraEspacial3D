@@ -4,9 +4,6 @@ import Photos
 import UIKit
 
 final class StereoVideoRecorder: ObservableObject {
-    static let recordWidth: Int = 1920
-    static let recordHeight: Int = 1080
-
     @Published var isRecording: Bool = false
     @Published var recordedSeconds: Int = 0
     @Published var toastMessage: String? = nil
@@ -20,7 +17,11 @@ final class StereoVideoRecorder: ObservableObject {
     private var isWritingActive = false
     private var timer: Timer?
 
-    func toggleRecording(formatName: String, hasCameraSignal: Bool) {
+    private(set) var activeWidth: Int = 1920
+    private(set) var activeHeight: Int = 1080
+    private(set) var activeAspectFit: Bool = false
+
+    func toggleRecording(formatName: String, hasCameraSignal: Bool, useFourByThree: Bool, isSBS: Bool) {
         if isRecording {
             stopRecording(formatName: formatName)
         } else {
@@ -28,13 +29,21 @@ final class StereoVideoRecorder: ObservableObject {
                 showToast("Aguardando sinal das câmeras...")
                 return
             }
-            startRecording()
+            // Se o usuario escolheu 4:3 (Proporcao Original), grava o arquivo MP4 em 1440x1080 (4:3 real sem barras)
+            // para Anaglifo Dubois, ou 1920x1080 para SBS 3D / 16:9 Tela Cheia
+            let width = (useFourByThree && !isSBS) ? 1440 : 1920
+            let height = 1080
+            startRecording(width: width, height: height, aspectFit: useFourByThree)
         }
     }
 
-    func startRecording() {
+    func startRecording(width: Int, height: Int, aspectFit: Bool) {
         writerQueue.async { [weak self] in
             guard let self = self, !self.isWritingActive else { return }
+
+            self.activeWidth = width
+            self.activeHeight = height
+            self.activeAspectFit = aspectFit
 
             let fileName = "CameraEspacial3D_\(Int(Date().timeIntervalSince1970)).mp4"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
@@ -48,8 +57,8 @@ final class StereoVideoRecorder: ObservableObject {
                 ]
                 let videoSettings: [String: Any] = [
                     AVVideoCodecKey: AVVideoCodecType.h264,
-                    AVVideoWidthKey: Self.recordWidth,
-                    AVVideoHeightKey: Self.recordHeight,
+                    AVVideoWidthKey: width,
+                    AVVideoHeightKey: height,
                     AVVideoCompressionPropertiesKey: compression
                 ]
 
@@ -58,8 +67,8 @@ final class StereoVideoRecorder: ObservableObject {
 
                 let sourceAttrs: [String: Any] = [
                     kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-                    kCVPixelBufferWidthKey as String: Self.recordWidth,
-                    kCVPixelBufferHeightKey as String: Self.recordHeight,
+                    kCVPixelBufferWidthKey as String: width,
+                    kCVPixelBufferHeightKey as String: height,
                     kCVPixelBufferMetalCompatibilityKey as String: true,
                     kCVPixelBufferIOSurfacePropertiesKey as String: [:]
                 ]

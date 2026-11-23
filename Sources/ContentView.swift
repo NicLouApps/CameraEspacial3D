@@ -110,8 +110,15 @@ struct ContentView: View {
 
             // Botão Principal de Gravação (Destaque funcional)
             Button(action: {
-                let fmtName = (settings.recordFormat == 0) ? "Espacial 3D" : "Anáglifo Dubois"
-                recorder.toggleRecording(formatName: fmtName, hasCameraSignal: hasActiveCameraFrames)
+                let isSBS = (settings.recordFormat == 0)
+                let ratioText = settings.aspectFit ? "4:3" : "16:9"
+                let fmtName = isSBS ? "Espacial 3D (\(ratioText))" : "Dubois (\(ratioText))"
+                recorder.toggleRecording(
+                    formatName: fmtName,
+                    hasCameraSignal: hasActiveCameraFrames,
+                    useFourByThree: settings.aspectFit,
+                    isSBS: isSBS
+                )
             }) {
                 HStack(spacing: 7) {
                     Circle()
@@ -225,7 +232,7 @@ struct ContentView: View {
                     .font(.system(size: 13, weight: .semibold, design: .default))
                     .foregroundColor(.white)
 
-                Text("v1.4")
+                Text("v1.5")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(textMuted)
 

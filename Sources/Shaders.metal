@@ -56,14 +56,14 @@ static inline float2 mapCameraUV(
     float safeTexAspect = max(texAspect, 0.001);
 
     if (aspectFitMode > 0.5) {
-        // Aspect-Fit (Proporcao Real): mostra 100% do sensor na proporcao original sem esticar e sem cortar
+        // Aspect-Fit (Proporcao Real 4:3): mostra o quadro sem esticar e sem cortar
         if (safeViewAspect > safeTexAspect) {
             p.x *= (safeViewAspect / safeTexAspect);
         } else {
             p.y *= (safeTexAspect / safeViewAspect);
         }
     } else {
-        // Aspect-Fill (Tela Cheia): preenche a tela sem deformar a proporcao
+        // Aspect-Fill (Tela Cheia 16:9): preenche todo o quadro sem deformar
         if (safeViewAspect > safeTexAspect) {
             p.y *= (safeTexAspect / safeViewAspect);
         } else {
@@ -75,8 +75,12 @@ static inline float2 mapCameraUV(
     return p + float2(0.5, 0.5) + shift;
 }
 
+static inline bool isInsideUnitUV(float2 uv) {
+    return (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0);
+}
+
 static inline float3 sampleClamped(texture2d<float> tex, sampler s, float2 uv) {
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    if (!isInsideUnitUV(uv)) {
         return float3(0.0, 0.0, 0.0);
     }
     return tex.sample(s, uv).rgb;
@@ -111,11 +115,18 @@ fragment float4 lenticularFragment(
     float viewH = max(u.viewportHeight, 1.0);
     float screenAspect = viewW / viewH;
 
+    // Usa u.wideAspect como moldura mestre para as duas lentes, garantindo que a Ultra-Wide (com zoom)
+    // seja recortada exatamente no mesmo retangulo da camera Principal (sem sobras vermelhas nas laterais)
     // Modo 1: SBS (Lado a Lado Espacial 3D)
     if (u.viewMode > 0.5 && u.viewMode < 1.5) {
         bool isLeftHalf = (in.uv.x < 0.5);
         float2 localUV = float2(isLeftHalf ? (in.uv.x * 2.0) : ((in.uv.x - 0.5) * 2.0), in.uv.y);
         float halfAspect = (viewW * 0.5) / viewH;
+
+        float2 frameUV = mapCameraUV(localUV, halfAspect, u.wideAspect, 1.0, float2(0.0, 0.0), u.aspectFitMode);
+        if (!isInsideUnitUV(frameUV)) {
+            return float4(0.0, 0.0, 0.0, 1.0);
+        }
 
         float2 uvWide = mapCameraUV(localUV, halfAspect, u.wideAspect, 1.0, float2(-u.convergeX * 0.5, 0.0), u.aspectFitMode);
         float2 uvUltra = mapCameraUV(localUV, halfAspect, u.ultraAspect, u.ultraZoom, float2(u.convergeX * 0.5, u.alignY), u.aspectFitMode);
@@ -128,11 +139,24 @@ fragment float4 lenticularFragment(
         return float4(rgb, 1.0);
     }
 
+    // Moldura mestre do quadro (baseada na proporcao da camera Principal):
+    // qualquer pixel fora da area ativa da camera Principal fica 100% preto (elimina sobras vermelhas da Ultra-Wide)
+    float2 masterFrameUV = mapCameraUV(in.uv, screenAspect, u.wideAspect, 1.0, float2(0.0, 0.0), u.aspectFitMode);
+    if (!isInsideUnitUV(masterFrameUV)) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+
     float2 uvWide = mapCameraUV(in.uv, screenAspect, u.wideAspect, 1.0, float2(-u.convergeX * 0.5, 0.0), u.aspectFitMode);
     float2 uvUltra = mapCameraUV(in.uv, screenAspect, u.ultraAspect, u.ultraZoom, float2(u.convergeX * 0.5, u.alignY), u.aspectFitMode);
 
-    float3 colWide = sampleClamped(wideTex, s, uvWide);
-    float3 colUltra = sampleClamped(ultraTex, s, uvUltra);
+    // Se ambas as lentes estiverem validas dentro da moldura mestre, combina os dois olhos;
+    // se uma borda de convergencia sair de [0,1], corta limpamente para preto para nao vazar canal vermelho/ciano sozinho
+    if (!isInsideUnitUV(uvWide) || !isInsideUnitUV(uvUltra)) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+
+    float3 colWide = wideTex.sample(s, uvWide).rgb;
+    float3 colUltra = ultraTex.sample(s, uvUltra).rgb;
 
     float3 leftEye = (u.swapEyes > 0.5) ? colUltra : colWide;
     float3 rightEye = (u.swapEyes > 0.5) ? colWide : colUltra;

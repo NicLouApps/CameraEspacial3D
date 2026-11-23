@@ -164,7 +164,7 @@ struct LenticularMetalView: UIViewRepresentable {
                                 viewMode: (settings.recordFormat == 0) ? 1.0 : 2.0,
                                 wideAspect: wAspect,
                                 ultraAspect: uAspect,
-                                aspectFitMode: 1.0
+                                aspectFitMode: settings.aspectFit ? 1.0 : 0.0
                             )
 
                             recEnc.setRenderPipelineState(pipelineState)
