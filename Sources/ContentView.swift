@@ -24,6 +24,16 @@ struct ContentView: View {
                     }
                 }
 
+            // Aviso visual caso a câmera apresente erro ou falta de permissão
+            switch cameraManager.status {
+            case .denied:
+                statusBanner("Acesso à câmera negado. Ative em Ajustes > Privacidade > Câmera.")
+            case .unsupported(let msg), .error(let msg):
+                statusBanner(msg)
+            default:
+                EmptyView()
+            }
+
             VStack(spacing: 8) {
                 // Barra Superior Compacta
                 HStack(spacing: 6) {
@@ -145,7 +155,7 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("CALIBRAÇÃO 3D & GRAVAÇÃO • v1.1")
+                    Text("CALIBRAÇÃO 3D & GRAVAÇÃO • v1.2")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.cyan)
                     Spacer()
@@ -264,6 +274,17 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
+    }
+
+    private func statusBanner(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .foregroundColor(.white)
+            .multilineTextAlignment(.center)
+            .padding(14)
+            .background(Color.red.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(24)
     }
 
     private func modeButton(title: String, mode: Int) -> some View {
