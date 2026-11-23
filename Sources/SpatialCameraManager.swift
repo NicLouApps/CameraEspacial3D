@@ -12,6 +12,12 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
     }
 
     @Published var status: CameraStatus = .starting
+    // 0 = 0°, 1 = 90°, 2 = 180°, 3 = 270° (correcao manual opcional caso o bloqueio de rotacao do iOS esteja ativo)
+    @Published var extraQuarterTurns: Int = 0 {
+        didSet {
+            reapplyRotation()
+        }
+    }
 
     private let session = AVCaptureMultiCamSession()
     private let sessionQueue = DispatchQueue(label: "com.lenticular.camera.session")
@@ -43,43 +49,80 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
     }
 
-    private static func currentInterfaceAngleOnMain() -> CGFloat {
-        if Thread.isMainThread {
-            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                switch scene.effectiveGeometry.interfaceOrientation {
-                case .landscapeLeft:
-                    return 180
-                case .landscapeRight:
-                    return 0
-                case .portraitUpsideDown:
-                    return 270
-                default:
-                    return 90
+    // Mapeia a orientacao real da janela do app (LandscapeLeft / LandscapeRight / Portrait)
+    private static func currentInterfaceOrientationOnMain() -> UIInterfaceOrientation {
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                let ori = windowScene.effectiveGeometry.interfaceOrientation
+                if ori != .unknown {
+                    return ori
                 }
             }
         }
         switch UIDevice.current.orientation {
         case .landscapeLeft:
-            return 0
+            return .landscapeRight
         case .landscapeRight:
-            return 180
+            return .landscapeLeft
         case .portraitUpsideDown:
-            return 270
+            return .portraitUpsideDown
+        case .portrait:
+            return .portrait
         default:
-            return 90
+            return .landscapeRight
         }
     }
 
+    private static func targetAngleAndOrientation(
+        interfaceOri: UIInterfaceOrientation,
+        extraQuarterTurns: Int
+    ) -> (angle: CGFloat, videoOri: AVCaptureVideoOrientation) {
+        let baseAngle: Int
+        switch interfaceOri {
+        case .landscapeRight:
+            // Dynamic Island na esquerda (home bar na direita): sensor traseiro ja esta alinhado a 0 graus
+            baseAngle = 0
+        case .landscapeLeft:
+            // Dynamic Island na direita: sensor traseiro a 180 graus
+            baseAngle = 180
+        case .portraitUpsideDown:
+            baseAngle = 270
+        case .portrait:
+            baseAngle = 90
+        default:
+            baseAngle = 0
+        }
+
+        let finalAngle = (baseAngle + (extraQuarterTurns * 90)) % 360
+        let videoOri: AVCaptureVideoOrientation
+        switch finalAngle {
+        case 0:
+            videoOri = .landscapeRight
+        case 180:
+            videoOri = .landscapeLeft
+        case 270:
+            videoOri = .portraitUpsideDown
+        default:
+            videoOri = .portrait
+        }
+        return (CGFloat(finalAngle), videoOri)
+    }
+
+    func rotate90Clockwise() {
+        extraQuarterTurns = (extraQuarterTurns + 1) % 4
+    }
+
     func start() {
-        let initialAngle = Self.currentInterfaceAngleOnMain()
+        let ifaceOri = Self.currentInterfaceOrientationOnMain()
+        let turns = self.extraQuarterTurns
         let auth = AVCaptureDevice.authorizationStatus(for: .video)
         switch auth {
         case .authorized:
-            configureAndRun(initialAngle: initialAngle)
+            configureAndRun(interfaceOri: ifaceOri, extraTurns: turns)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 if granted {
-                    self?.configureAndRun(initialAngle: initialAngle)
+                    self?.configureAndRun(interfaceOri: ifaceOri, extraTurns: turns)
                 } else {
                     DispatchQueue.main.async {
                         self?.status = .denied
@@ -110,14 +153,16 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
         return (w, u)
     }
 
-    private func configureAndRun(initialAngle: CGFloat) {
+    private func configureAndRun(interfaceOri: UIInterfaceOrientation, extraTurns: Int) {
+        let target = Self.targetAngleAndOrientation(interfaceOri: interfaceOri, extraQuarterTurns: extraTurns)
+
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             if self.isConfigured {
+                self.applyConnectionRotationOnSessionQueue(angle: target.angle, videoOri: target.videoOri)
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
-                self.applyRotationOnSessionQueue(initialAngle)
                 DispatchQueue.main.async {
                     self.status = .running
                 }
@@ -192,9 +237,6 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                     let conn = AVCaptureConnection(inputPorts: [widePort], output: self.wideOutput)
                     if self.session.canAddConnection(conn) {
                         self.session.addConnection(conn)
-                        if conn.isVideoRotationAngleSupported(initialAngle) {
-                            conn.videoRotationAngle = initialAngle
-                        }
                         self.wideConnection = conn
                     } else {
                         configOk = false
@@ -211,9 +253,6 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                     let conn = AVCaptureConnection(inputPorts: [ultraPort], output: self.ultraOutput)
                     if self.session.canAddConnection(conn) {
                         self.session.addConnection(conn)
-                        if conn.isVideoRotationAngleSupported(initialAngle) {
-                            conn.videoRotationAngle = initialAngle
-                        }
                         self.ultraConnection = conn
                     } else {
                         configOk = false
@@ -221,6 +260,9 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                 } else {
                     configOk = false
                 }
+
+                // Aplica a MESMA rotacao para a camera Principal e para a Ultra-Wide dentro de beginConfiguration
+                self.applyConnectionRotationOnSessionQueue(angle: target.angle, videoOri: target.videoOri)
             } catch {
                 configOk = false
                 self.session.commitConfiguration()
@@ -241,7 +283,7 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
 
             self.isConfigured = true
             self.session.startRunning()
-            self.applyRotationOnSessionQueue(initialAngle)
+            self.applyConnectionRotationOnSessionQueue(angle: target.angle, videoOri: target.videoOri)
             DispatchQueue.main.async {
                 self.status = .running
             }
@@ -258,7 +300,15 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
             return is420 && dims.width <= 1920 && dims.height <= 1080
         }
 
-        let best = candidates.max { a, b in
+        // Prefere formatos 4:3 (ou se todos forem 16:9, escolhe o maior formato de mesma proporcao para ambas as lentes)
+        let fourByThree = candidates.filter { fmt in
+            let d = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            let ratio = Double(d.width) / Double(max(1, d.height))
+            return abs(ratio - (4.0 / 3.0)) < 0.08
+        }
+        let pool = fourByThree.isEmpty ? candidates : fourByThree
+
+        let best = pool.max { a, b in
             let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
             let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
             return (da.width * da.height) < (db.width * db.height)
@@ -278,18 +328,32 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
     }
 
     @objc private func orientationDidChange() {
-        let angle = Self.currentInterfaceAngleOnMain()
-        sessionQueue.async { [weak self] in
-            self?.applyRotationOnSessionQueue(angle)
+        reapplyRotation()
+    }
+
+    func reapplyRotation() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let ifaceOri = Self.currentInterfaceOrientationOnMain()
+            let turns = self.extraQuarterTurns
+            let target = Self.targetAngleAndOrientation(interfaceOri: ifaceOri, extraQuarterTurns: turns)
+            self.sessionQueue.async {
+                self.applyConnectionRotationOnSessionQueue(angle: target.angle, videoOri: target.videoOri)
+            }
         }
     }
 
-    private func applyRotationOnSessionQueue(_ angle: CGFloat) {
-        if let wc = wideConnection, wc.isVideoRotationAngleSupported(angle) {
-            wc.videoRotationAngle = angle
-        }
-        if let uc = ultraConnection, uc.isVideoRotationAngleSupported(angle) {
-            uc.videoRotationAngle = angle
+    private func applyConnectionRotationOnSessionQueue(angle: CGFloat, videoOri: AVCaptureVideoOrientation) {
+        for conn in [wideConnection, ultraConnection].compactMap({ $0 }) {
+            if conn.isVideoRotationAngleSupported(angle) {
+                conn.videoRotationAngle = angle
+            } else if conn.isVideoOrientationSupported {
+                conn.videoOrientation = videoOri
+            }
+            if conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = false
+                conn.isVideoMirrored = false
+            }
         }
     }
 

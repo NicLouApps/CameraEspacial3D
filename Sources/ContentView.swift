@@ -178,6 +178,23 @@ struct ContentView: View {
             }
             .accessibilityLabel("Alternar proporção real 4:3 ou tela cheia")
 
+            // Botão Rápido para Girar 90° a Imagem (caso o bloqueio de rotação do iPhone esteja ativo)
+            Button(action: {
+                cameraManager.rotate90Clockwise()
+            }) {
+                Image(systemName: "rotate.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                    .background(bgSurface.opacity(0.92))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(borderDark, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .accessibilityLabel("Girar imagem da câmera em 90 graus")
+
             // Botão de Ajustes / Calibração
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -208,7 +225,7 @@ struct ContentView: View {
                     .font(.system(size: 13, weight: .semibold, design: .default))
                     .foregroundColor(.white)
 
-                Text("v1.3")
+                Text("v1.4")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(textMuted)
 
