@@ -20,10 +20,14 @@ final class StereoVideoRecorder: ObservableObject {
     private var isWritingActive = false
     private var timer: Timer?
 
-    func toggleRecording(formatName: String) {
+    func toggleRecording(formatName: String, hasCameraSignal: Bool) {
         if isRecording {
             stopRecording(formatName: formatName)
         } else {
+            guard hasCameraSignal else {
+                showToast("Aguardando sinal das câmeras...")
+                return
+            }
             startRecording()
         }
     }
@@ -143,12 +147,23 @@ final class StereoVideoRecorder: ObservableObject {
                 return
             }
 
+            let capturedFrames = self.frameIndex
             input.markAsFinished()
             writer.finishWriting { [weak self] in
                 guard let self = self else { return }
+                let writerStatus = writer.status
+                let writerError = writer.error
                 self.assetWriter = nil
                 self.videoInput = nil
                 self.adaptor = nil
+
+                if capturedFrames < 2 || writerStatus != .completed {
+                    try? FileManager.default.removeItem(at: fileURL)
+                    let reason = writerError?.localizedDescription ?? "Grave por pelo menos 1 segundo com imagem ativa."
+                    self.showToast("Gravação muito curta ou sem quadros (\(reason))")
+                    return
+                }
+
                 self.saveToPhotoLibrary(url: fileURL, formatName: formatName)
             }
         }
@@ -157,7 +172,7 @@ final class StereoVideoRecorder: ObservableObject {
     private func saveToPhotoLibrary(url: URL, formatName: String) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
             guard status == .authorized || status == .limited else {
-                self?.showToast("Permita acesso ao Fotos para salvar o vídeo.")
+                self?.showToast("Permita acesso ao Fotos em Ajustes para salvar o vídeo.")
                 return
             }
             PHPhotoLibrary.shared().performChanges({
@@ -165,7 +180,7 @@ final class StereoVideoRecorder: ObservableObject {
             }) { success, error in
                 try? FileManager.default.removeItem(at: url)
                 if success {
-                    self?.showToast("Vídeo \(formatName) salvo no app Fotos!")
+                    self?.showToast("Vídeo \(formatName) salvo em Fotos")
                 } else {
                     self?.showToast("Erro ao salvar vídeo: \(error?.localizedDescription ?? "Desconhecido")")
                 }
@@ -176,7 +191,7 @@ final class StereoVideoRecorder: ObservableObject {
     private func showToast(_ msg: String) {
         DispatchQueue.main.async {
             self.toastMessage = msg
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
                 if self?.toastMessage == msg {
                     self?.toastMessage = nil
                 }

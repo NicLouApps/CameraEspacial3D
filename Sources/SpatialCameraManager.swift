@@ -43,15 +43,43 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
     }
 
+    private static func currentInterfaceAngleOnMain() -> CGFloat {
+        if Thread.isMainThread {
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                switch scene.effectiveGeometry.interfaceOrientation {
+                case .landscapeLeft:
+                    return 180
+                case .landscapeRight:
+                    return 0
+                case .portraitUpsideDown:
+                    return 270
+                default:
+                    return 90
+                }
+            }
+        }
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:
+            return 0
+        case .landscapeRight:
+            return 180
+        case .portraitUpsideDown:
+            return 270
+        default:
+            return 90
+        }
+    }
+
     func start() {
+        let initialAngle = Self.currentInterfaceAngleOnMain()
         let auth = AVCaptureDevice.authorizationStatus(for: .video)
         switch auth {
         case .authorized:
-            configureAndRun()
+            configureAndRun(initialAngle: initialAngle)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 if granted {
-                    self?.configureAndRun()
+                    self?.configureAndRun(initialAngle: initialAngle)
                 } else {
                     DispatchQueue.main.async {
                         self?.status = .denied
@@ -82,9 +110,7 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
         return (w, u)
     }
 
-    private func configureAndRun() {
-        let initialAngle = Self.deviceRotationAngle()
-
+    private func configureAndRun(initialAngle: CGFloat) {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             if self.isConfigured {
@@ -251,25 +277,8 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
         } catch {}
     }
 
-    private static func deviceRotationAngle() -> CGFloat {
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:
-            return 0
-        case .landscapeRight:
-            return 180
-        case .portraitUpsideDown:
-            return 270
-        default:
-            return 90
-        }
-    }
-
     @objc private func orientationDidChange() {
-        let devOri = UIDevice.current.orientation
-        guard devOri == .portrait || devOri == .portraitUpsideDown || devOri == .landscapeLeft || devOri == .landscapeRight else {
-            return
-        }
-        let angle = Self.deviceRotationAngle()
+        let angle = Self.currentInterfaceAngleOnMain()
         sessionQueue.async { [weak self] in
             self?.applyRotationOnSessionQueue(angle)
         }
