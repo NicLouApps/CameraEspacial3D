@@ -1,0 +1,38 @@
+======================================================================
+  CÂMERA ESPACIAL 3D (iOS Nativo) v1.0_2026-11-22_23h14
+  Pré-calibrado para iPhone 16 Pro Max + Folha 75 LPI:
+  Pitch: 6.116 | Ângulo: 14.76° | Fase: 0.38 | Anti-Fantasma: 20% | INV E/D: ON
+======================================================================
+
+COMO GERAR O ARQUIVO .IPA GRATUITAMENTE (SEM MAC) E INSTALAR NO IPHONE:
+
+PASSO 1 — Subir esta pasta no GitHub (Gratuito)
+1. Acesse https://github.com/new no navegador e crie um repositório (ex.: CameraEspacial3D).
+2. Clique em "uploading an existing file" (ou arraste os arquivos).
+3. Arraste TODOS os arquivos e pastas de dentro de:
+   C:\Users\niclo\.gemini\antigravity\scratch\CameraEspacial3D
+   (Importante: inclua a pasta .github, Sources, Assets.xcassets, Info.plist e project.yml)
+4. Clique no botão verde "Commit changes".
+
+PASSO 2 — Baixar o arquivo .IPA pronto do GitHub Actions
+1. No seu repositório do GitHub, clique na aba "Actions" no topo.
+2. O workflow "Build CameraEspacial3D iOS IPA" vai rodar sozinho (ou clique em "Run workflow").
+3. Aguarde cerca de 3 a 4 minutos até ficar com o ícone verde de concluído.
+4. Clique no build concluído e, na seção "Artifacts" lá embaixo, clique em:
+   "CameraEspacial3D-iOS-IPA-v1.0_2026-11-22_23h14"
+5. Extraia o ZIP baixado: dentro dele estará o arquivo:
+   CameraEspacial3D_v1.0_2026-11-22_23h14.ipa
+
+PASSO 3 — Instalar no iPhone 16 Pro Max pelo Windows
+1. Baixe e abra o Sideloadly para Windows (https://sideloadly.io/) — é gratuito.
+2. Conecte seu iPhone 16 Pro Max no PC via cabo USB.
+3. Arraste o arquivo CameraEspacial3D_v1.0_2026-11-22_23h14.ipa para o Sideloadly.
+4. Digite seu e-mail do Apple ID e clique em "Start".
+5. No iPhone (se for a primeira vez):
+   - Vá em Ajustes > Geral > VPN e Gerenciamento de Dispositivo e confie no seu Apple ID.
+   - No iOS 16/17/18, ative o "Modo Desenvolvedor" em Ajustes > Privacidade e Segurança > Modo Desenvolvedor.
+
+COMO USAR O APP NO IPHONE:
+- Ao abrir, permita o acesso à câmera: o app liga a câmera Principal (1x) e a Ultra-Angular (0.5x) AO MESMO TEMPO em 60 fps!
+- Ele já abre calibrado para sua folha de 75 LPI (Pitch 6.116, Ângulo 14.76°, Fase 0.38, Anti-Fantasma 20%, INV E/D ON).
+- Toque no botão "CFG" no canto superior direito para ajustar o Zoom da Ultra-Wide, Convergência 3D, Alinhamento Vertical ou alternar entre 3D Lenticular, SBS e Anáglifo.
