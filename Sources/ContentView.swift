@@ -3,37 +3,122 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var cameraManager = SpatialCameraManager()
     @StateObject private var settings = CalibrationSettings()
+    @StateObject private var recorder = StereoVideoRecorder()
     @State private var showControls = false
+
+    private func formatDuration(_ sec: Int) -> String {
+        let m = sec / 60
+        let s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
 
     var body: some View {
         ZStack {
-            LenticularMetalView(cameraManager: cameraManager, settings: settings)
+            Color.black.ignoresSafeArea()
+
+            LenticularMetalView(cameraManager: cameraManager, settings: settings, recorder: recorder)
                 .ignoresSafeArea()
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showControls.toggle()
+                    }
+                }
 
-            statusOverlay
-
-            VStack {
-                HStack {
-                    Spacer()
+            VStack(spacing: 8) {
+                // Barra Superior Compacta
+                HStack(spacing: 6) {
+                    // Seletor de Formato de Gravação (Espacial 3D SBS vs Anáglifo Dubois)
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                        if !recorder.isRecording {
+                            settings.recordFormat = (settings.recordFormat == 0) ? 1 : 0
+                        }
+                    }) {
+                        Text(settings.recordFormat == 0 ? "GRAVAR: ESPACIAL 3D" : "GRAVAR: DUBOIS")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(settings.recordFormat == 0 ? .cyan : .orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.68))
+                            .overlay(
+                                Capsule().stroke(settings.recordFormat == 0 ? Color.cyan.opacity(0.55) : Color.orange.opacity(0.65), lineWidth: 1)
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .disabled(recorder.isRecording)
+
+                    // Botão de Gravar / Parar Vídeo
+                    Button(action: {
+                        let fmtName = (settings.recordFormat == 0) ? "Espacial 3D (SBS)" : "Anáglifo Dubois"
+                        recorder.toggleRecording(formatName: fmtName)
+                    }) {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 7, height: 7)
+                            Text(recorder.isRecording ? "PARAR \(formatDuration(recorder.recordedSeconds))" : "GRAVAR")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(recorder.isRecording ? Color.red : Color.red.opacity(0.82))
+                        .overlay(
+                            Capsule().stroke(Color.white.opacity(0.45), lineWidth: 1)
+                        )
+                        .clipShape(Capsule())
+                    }
+
+                    Spacer()
+
+                    // Alternador Rápido de Proporção da Câmera (Proporção Real vs Preencher Tela)
+                    Button(action: {
+                        settings.aspectFit.toggle()
+                    }) {
+                        Text(settings.aspectFit ? "PROP. REAL" : "TELA CHEIA")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(settings.aspectFit ? .green : .white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.68))
+                            .overlay(
+                                Capsule().stroke(settings.aspectFit ? Color.green.opacity(0.55) : Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                            .clipShape(Capsule())
+                    }
+
+                    // Botão de Painel de Calibração e Ajustes
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
                             showControls.toggle()
                         }
                     }) {
                         Text(showControls ? "FECHAR" : "CFG")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyan)
+                            .padding(.horizontal, 11)
                             .padding(.vertical, 7)
-                            .background(Color(red: 0.03, green: 0.07, blue: 0.16).opacity(showControls ? 0.92 : 0.55))
+                            .background(Color.black.opacity(0.68))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color.cyan.opacity(0.75), lineWidth: 1.5)
+                                Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1)
                             )
-                            .cornerRadius(10)
+                            .clipShape(Capsule())
                     }
-                    .padding(.top, 10)
-                    .padding(.trailing, 14)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+
+                // Toast de Status da Gravação
+                if let toast = recorder.toastMessage {
+                    Text(toast)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.black.opacity(0.82))
+                        .overlay(
+                            Capsule().stroke(Color.cyan.opacity(0.6), lineWidth: 1)
+                        )
+                        .clipShape(Capsule())
                 }
 
                 Spacer()
@@ -56,227 +141,211 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var statusOverlay: some View {
-        switch cameraManager.status {
-        case .running, .starting:
-            EmptyView()
-        case .denied:
-            statusCard(
-                title: "Permissão de Câmera Necessária",
-                message: "Ative o acesso à câmera em Ajustes > Privacidade > Câmera para visualizar o 3D ao vivo."
-            )
-        case .unsupported(let msg):
-            statusCard(title: "MultiCam Indisponível", message: msg)
-        case .error(let msg):
-            statusCard(title: "Erro nas Câmeras", message: msg)
-        }
-    }
-
-    private func statusCard(title: String, message: String) -> some View {
-        VStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.cyan)
-            Text(message)
-                .font(.system(size: 13))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-        }
-        .padding(18)
-        .background(Color(red: 0.04, green: 0.08, blue: 0.18).opacity(0.92))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.cyan.opacity(0.7), lineWidth: 1.5)
-        )
-        .cornerRadius(16)
-        .padding(24)
-    }
-
     private var controlPanel: some View {
         ScrollView {
-            VStack(spacing: 10) {
-                // Modo de visualizacao
-                HStack(spacing: 6) {
-                    modeButton(title: "3D LENTICULAR", mode: 0)
-                    modeButton(title: "SBS", mode: 1)
-                    modeButton(title: "ANÁGLIFO", mode: 2)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("CALIBRAÇÃO 3D & GRAVAÇÃO • v1.1")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                    Spacer()
+                    Button("RESET 75 LPI") {
+                        settings.resetToIphone16ProMax75LPI()
+                    }
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
                 }
 
-                // Alinhamento das duas lentes (Wide 1x + Ultra-Wide 0.5x)
-                VStack(spacing: 6) {
-                    sliderRow(
-                        label: "ZOOM ULTRA-WIDE",
-                        valueText: String(format: "%.2fx", settings.ultraZoom),
-                        value: $settings.ultraZoom,
-                        range: 1.40...2.40,
-                        step: 0.01
-                    )
-                    sliderRow(
-                        label: "CONVERGÊNCIA 3D (X)",
-                        valueText: String(format: "%+.1f%%", settings.convergeX * 100),
-                        value: $settings.convergeX,
-                        range: -0.15...0.15,
-                        step: 0.002
-                    )
-                    sliderRow(
-                        label: "ALINHAMENTO VERTICAL (Y)",
-                        valueText: String(format: "%+.1f%%", settings.alignY * 100),
-                        value: $settings.alignY,
-                        range: -0.12...0.12,
-                        step: 0.002
-                    )
+                // Seletor de Modo de Visualização Ao Vivo
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VISUALIZAÇÃO AO VIVO NA TELA:")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    HStack(spacing: 6) {
+                        modeButton(title: "3D LENTICULAR", mode: 0)
+                        modeButton(title: "ESPACIAL SBS", mode: 1)
+                        modeButton(title: "ANÁGLIFO DUBOIS", mode: 2)
+                    }
                 }
-                .padding(8)
-                .background(Color.white.opacity(0.05))
-                .cornerRadius(10)
 
-                // Calibracao Lenticular (75 LPI pre-carregada)
-                VStack(spacing: 6) {
-                    HStack {
-                        Text("PITCH: \(String(format: "%.3f", settings.pitch))")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.cyan)
-                        Spacer()
-                        stepButton("-0.01") { settings.pitch = max(2.0, settings.pitch - 0.01) }
-                        stepButton("-0.001") { settings.pitch = max(2.0, settings.pitch - 0.001) }
-                        stepButton("+0.001") { settings.pitch = min(11.0, settings.pitch + 0.001) }
-                        stepButton("+0.01") { settings.pitch = min(11.0, settings.pitch + 0.01) }
+                // Seletor de Formato de Gravação de Vídeo
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FORMATO DO VÍDEO GRAVADO (1080p 30FPS • FOTOS):")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    HStack(spacing: 6) {
+                        recordFormatButton(title: "VÍDEO ESPACIAL 3D (SBS)", format: 0)
+                        recordFormatButton(title: "VÍDEO ANÁGLIFO DUBOIS", format: 1)
                     }
-                    Slider(value: $settings.pitch, in: 5.20...7.20)
-                        .tint(.cyan)
-
-                    HStack {
-                        Text("ÂNGULO: \(String(format: "%.2f°", settings.angleDeg))")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.cyan)
-                        Spacer()
-                        stepButton("-0.2°") { settings.angleDeg = max(-30, settings.angleDeg - 0.2) }
-                        stepButton("-0.02°") { settings.angleDeg = max(-30, settings.angleDeg - 0.02) }
-                        stepButton("+0.02°") { settings.angleDeg = min(30, settings.angleDeg + 0.02) }
-                        stepButton("+0.2°") { settings.angleDeg = min(30, settings.angleDeg + 0.2) }
-                    }
-                    Slider(value: $settings.angleDeg, in: -30.0...30.0)
-                        .tint(.cyan)
-
-                    sliderRow(
-                        label: "FASE (OFFSET)",
-                        valueText: String(format: "%.2f", settings.offset),
-                        value: $settings.offset,
-                        range: 0.0...1.0,
-                        step: 0.01
-                    )
-                    sliderRow(
-                        label: "ANTI-FANTASMA",
-                        valueText: "\(Int(settings.guardPct))%",
-                        value: $settings.guardPct,
-                        range: 0.0...45.0,
-                        step: 1.0
-                    )
                 }
-                .padding(8)
-                .background(Color.white.opacity(0.05))
-                .cornerRadius(10)
 
-                // Botoes rapidos
-                HStack(spacing: 6) {
-                    toggleButton(
-                        title: settings.swapEyes ? "INV E/D: ON" : "INV E/D: OFF",
-                        active: settings.swapEyes
-                    ) {
-                        settings.swapEyes.toggle()
-                    }
-                    toggleButton(
-                        title: settings.orientHoriz ? "LINHAS: HORIZ" : "LINHAS: VERT",
-                        active: settings.orientHoriz
-                    ) {
-                        settings.orientHoriz.toggle()
-                    }
-                    Button(action: { settings.resetDefaults() }) {
-                        Text("RESET 75 LPI")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(Color.red.opacity(0.35))
-                            .cornerRadius(8)
-                    }
+                // Proporção da Imagem
+                HStack(spacing: 8) {
+                    toggleButton(title: "PROPORÇÃO REAL (SEM ESTICAR)", isOn: $settings.aspectFit)
+                }
+
+                // Sliders Lenticulares (Pitch, Ângulo, Fase, Anti-Fantasma)
+                sliderRow(
+                    title: "PITCH (PX/LENTE)",
+                    value: $settings.pitch,
+                    range: 3.0...12.0,
+                    step: 0.001,
+                    format: "%.3f"
+                )
+
+                sliderRow(
+                    title: "ÂNGULO (°)",
+                    value: $settings.angleDeg,
+                    range: -35.0...35.0,
+                    step: 0.01,
+                    format: "%.2f°"
+                )
+
+                sliderRow(
+                    title: "FASE (OFFSET)",
+                    value: $settings.offset,
+                    range: 0.0...1.0,
+                    step: 0.01,
+                    format: "%.2f"
+                )
+
+                sliderRow(
+                    title: "ANTI-FANTASMA",
+                    value: $settings.guardPct,
+                    range: 0.0...45.0,
+                    step: 1.0,
+                    format: "%.0f%%"
+                )
+
+                Divider().background(Color.white.opacity(0.2))
+
+                // Alinhamento Óptico entre Lente Principal (24mm) e Ultra-Wide (13mm)
+                sliderRow(
+                    title: "ZOOM ULTRA-WIDE (CASAR FOV 24MM)",
+                    value: $settings.ultraZoom,
+                    range: 1.20...2.60,
+                    step: 0.01,
+                    format: "%.2fx"
+                )
+
+                sliderRow(
+                    title: "CONVERGÊNCIA 3D (PARALAXE H)",
+                    value: $settings.convergeX,
+                    range: -0.25...0.25,
+                    step: 0.002,
+                    format: "%+.3f"
+                )
+
+                sliderRow(
+                    title: "ALINHAMENTO VERTICAL (Y)",
+                    value: $settings.alignY,
+                    range: -0.20...0.20,
+                    step: 0.002,
+                    format: "%+.3f"
+                )
+
+                HStack(spacing: 8) {
+                    toggleButton(title: "INV E/D", isOn: $settings.swapEyes)
+                    toggleButton(title: "LINHAS HORIZ", isOn: $settings.orientHoriz)
                 }
             }
-            .padding(12)
+            .padding(14)
         }
-        .frame(maxWidth: 520, maxHeight: 330)
-        .background(Color(red: 0.03, green: 0.06, blue: 0.14).opacity(0.90))
+        .frame(maxHeight: 340)
+        .background(Color(red: 0.03, green: 0.06, blue: 0.11).opacity(0.90))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.cyan.opacity(0.55), lineWidth: 1.5)
+                .stroke(Color.cyan.opacity(0.35), lineWidth: 1)
         )
-        .cornerRadius(16)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
     }
 
     private func modeButton(title: String, mode: Int) -> some View {
-        let active = settings.viewMode == mode
-        return Button(action: { settings.viewMode = mode }) {
+        Button(action: { settings.viewMode = mode }) {
             Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(settings.viewMode == mode ? .black : .white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(active ? Color.cyan.opacity(0.35) : Color.white.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(active ? Color.cyan : Color.clear, lineWidth: 1.5)
-                )
-                .cornerRadius(8)
+                .padding(.vertical, 7)
+                .background(settings.viewMode == mode ? Color.cyan : Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 
-    private func stepButton(_ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 10.5, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.14))
-                .cornerRadius(6)
-        }
-    }
-
-    private func toggleButton(title: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(active ? Color.orange.opacity(0.35) : Color.white.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(active ? Color.orange : Color.white.opacity(0.2), lineWidth: 1)
-                )
-                .cornerRadius(8)
-        }
-    }
-
-    private func sliderRow(label: String,
-                           valueText: String,
-                           value: Binding<Float>,
-                           range: ClosedRange<Float>,
-                           step: Float) -> some View {
-        VStack(spacing: 2) {
-            HStack {
-                Text(label)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundColor(Color(red: 0.72, green: 0.85, blue: 0.98))
-                Spacer()
-                Text(valueText)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.cyan)
+    private func recordFormatButton(title: String, format: Int) -> some View {
+        Button(action: {
+            if !recorder.isRecording {
+                settings.recordFormat = format
             }
-            Slider(value: value, in: range, step: step)
+        }) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(settings.recordFormat == format ? .black : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(settings.recordFormat == format ? Color.orange : Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .disabled(recorder.isRecording)
+    }
+
+    private func toggleButton(title: String, isOn: Binding<Bool>) -> some View {
+        Button(action: { isOn.wrappedValue.toggle() }) {
+            Text("\(title): \(isOn.wrappedValue ? "ON" : "OFF")")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(isOn.wrappedValue ? .black : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(isOn.wrappedValue ? Color.orange : Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func sliderRow(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        format: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.gray)
+                Spacer()
+                Button("-1") {
+                    value.wrappedValue = max(range.lowerBound, value.wrappedValue - step)
+                }
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyan)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                Text(String(format: format, value.wrappedValue))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan)
+                    .frame(minWidth: 58, alignment: .trailing)
+
+                Button("+1") {
+                    value.wrappedValue = min(range.upperBound, value.wrappedValue + step)
+                }
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyan)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            Slider(value: value, in: range)
                 .tint(.cyan)
         }
     }

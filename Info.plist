@@ -17,13 +17,17 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Usamos as câmeras Principal e Ultra-Angular simultaneamente para exibir 3D estereoscópico ao vivo sob película lenticular.</string>
+	<string>Usamos as câmeras Principal e Ultra-Angular simultaneamente para exibir e gravar 3D estereoscópico ao vivo.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Necessário para salvar os vídeos 3D Espaciais e Anáglifo Dubois gravados no app Fotos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Necessário para salvar os vídeos 3D Espaciais e Anáglifo Dubois gravados no app Fotos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,7 +1,7 @@
 import SwiftUI
-import Metal
 import MetalKit
 import CoreVideo
+import QuartzCore
 
 struct LenticularUniforms {
     var viewportWidth: Float
@@ -18,170 +18,194 @@ struct LenticularUniforms {
     var viewMode: Float
     var wideAspect: Float
     var ultraAspect: Float
+    var aspectFitMode: Float
 }
 
 struct LenticularMetalView: UIViewRepresentable {
     let cameraManager: SpatialCameraManager
     @ObservedObject var settings: CalibrationSettings
+    @ObservedObject var recorder: StereoVideoRecorder
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(cameraManager: cameraManager, settings: settings)
+        Coordinator(cameraManager: cameraManager, settings: settings, recorder: recorder)
     }
 
     func makeUIView(context: Context) -> MTKView {
-        let mtkView = MTKView(frame: .zero, device: context.coordinator.device)
+        let mtkView = MTKView()
+        mtkView.device = context.coordinator.device
         mtkView.delegate = context.coordinator
-        mtkView.framebufferOnly = true
+        mtkView.framebufferOnly = false
         mtkView.colorPixelFormat = .bgra8Unorm
         mtkView.preferredFramesPerSecond = 60
+        mtkView.contentScaleFactor = UIScreen.main.nativeScale
         mtkView.isPaused = false
         mtkView.enableSetNeedsDisplay = false
-        mtkView.contentScaleFactor = UIScreen.main.nativeScale
-        mtkView.clearColor = MTLClearColor(red: 0.015, green: 0.03, blue: 0.07, alpha: 1.0)
         return mtkView
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
-        let scale = UIScreen.main.nativeScale
-        if uiView.contentScaleFactor != scale {
-            uiView.contentScaleFactor = scale
-        }
+        context.coordinator.settings = settings
+        context.coordinator.recorder = recorder
     }
 
     final class Coordinator: NSObject, MTKViewDelegate {
         let device: MTLDevice?
-        private let commandQueue: MTLCommandQueue?
+        private var commandQueue: MTLCommandQueue?
         private var pipelineState: MTLRenderPipelineState?
         private var textureCache: CVMetalTextureCache?
-        private var fallbackTexture: MTLTexture?
 
-        private let cameraManager: SpatialCameraManager
-        private let settings: CalibrationSettings
+        let cameraManager: SpatialCameraManager
+        var settings: CalibrationSettings
+        var recorder: StereoVideoRecorder
+        private var lastRecordTime: CFTimeInterval = 0
 
-        init(cameraManager: SpatialCameraManager, settings: CalibrationSettings) {
+        init(cameraManager: SpatialCameraManager, settings: CalibrationSettings, recorder: StereoVideoRecorder) {
             self.cameraManager = cameraManager
             self.settings = settings
-            let dev = MTLCreateSystemDefaultDevice()
-            self.device = dev
-            self.commandQueue = dev?.makeCommandQueue()
+            self.recorder = recorder
+            self.device = MTLCreateSystemDefaultDevice()
             super.init()
-
-            guard let dev = dev else { return }
-            CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, dev, nil, &textureCache)
-            setupPipeline(device: dev)
-            setupFallbackTexture(device: dev)
+            setupMetal()
         }
 
-        private func setupPipeline(device: MTLDevice) {
+        private func setupMetal() {
+            guard let device = device else { return }
+            commandQueue = device.makeCommandQueue()
+            CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+
             guard let library = device.makeDefaultLibrary(),
-                  let vfn = library.makeFunction(name: "vertex_fullscreen"),
-                  let ffn = library.makeFunction(name: "fragment_lenticular") else {
-                return
-            }
+                  let vtx = library.makeFunction(name: "lenticularVertex"),
+                  let frag = library.makeFunction(name: "lenticularFragment") else { return }
+
             let desc = MTLRenderPipelineDescriptor()
-            desc.vertexFunction = vfn
-            desc.fragmentFunction = ffn
+            desc.vertexFunction = vtx
+            desc.fragmentFunction = frag
             desc.colorAttachments[0].pixelFormat = .bgra8Unorm
             pipelineState = try? device.makeRenderPipelineState(descriptor: desc)
-        }
-
-        private func setupFallbackTexture(device: MTLDevice) {
-            let desc = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .bgra8Unorm,
-                width: 2,
-                height: 2,
-                mipmapped: false
-            )
-            desc.usage = [.shaderRead]
-            if let tex = device.makeTexture(descriptor: desc) {
-                var black = [UInt8](repeating: 0, count: 16)
-                for i in stride(from: 3, to: 16, by: 4) { black[i] = 255 }
-                tex.replace(
-                    region: MTLRegionMake2D(0, 0, 2, 2),
-                    mipmapLevel: 0,
-                    withBytes: black,
-                    bytesPerRow: 8
-                )
-                fallbackTexture = tex
-            }
-        }
-
-        private func makeTexture(from pixelBuffer: CVPixelBuffer?) -> (tex: MTLTexture?, aspect: Float) {
-            guard let pb = pixelBuffer, let cache = textureCache else {
-                return (fallbackTexture, 1.333)
-            }
-            let w = CVPixelBufferGetWidth(pb)
-            let h = CVPixelBufferGetHeight(pb)
-            guard w > 0 && h > 0 else {
-                return (fallbackTexture, 1.333)
-            }
-            var cvTexOut: CVMetalTexture?
-            let status = CVMetalTextureCacheCreateTextureFromImage(
-                kCFAllocatorDefault,
-                cache,
-                pb,
-                nil,
-                .bgra8Unorm,
-                w,
-                h,
-                0,
-                &cvTexOut
-            )
-            if status == kCVReturnSuccess, let cvTex = cvTexOut, let mtlTex = CVMetalTextureGetTexture(cvTex) {
-                return (mtlTex, Float(w) / Float(h))
-            }
-            return (fallbackTexture, 1.333)
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
         func draw(in view: MTKView) {
-            guard let pipeline = pipelineState,
-                  let queue = commandQueue,
-                  let drawable = view.currentDrawable,
+            guard let drawable = view.currentDrawable,
                   let rpd = view.currentRenderPassDescriptor,
-                  let cmd = queue.makeCommandBuffer(),
-                  let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else {
-                return
-            }
+                  let pipelineState = pipelineState,
+                  let commandQueue = commandQueue,
+                  let textureCache = textureCache else { return }
 
-            let bufs = cameraManager.currentBuffers()
-            let (wideTex, wideAspect) = makeTexture(from: bufs.wide)
-            let (ultraTex, ultraAspect) = makeTexture(from: bufs.ultra)
+            let pair = cameraManager.copyLatestStereoPair()
+            guard let wideBuf = pair.wide, let ultraBuf = pair.ultra else { return }
 
-            guard let tW = wideTex ?? fallbackTexture,
-                  let tU = ultraTex ?? fallbackTexture else {
+            guard let wideTex = makeTexture(from: wideBuf, cache: textureCache),
+                  let ultraTex = makeTexture(from: ultraBuf, cache: textureCache) else { return }
+
+            guard let cmd = commandQueue.makeCommandBuffer() else { return }
+
+            let wAspect = Float(wideTex.width) / max(1.0, Float(wideTex.height))
+            let uAspect = Float(ultraTex.width) / max(1.0, Float(ultraTex.height))
+
+            // 1. Passe de renderização da tela ao vivo (60 fps)
+            if let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) {
+                var uniforms = LenticularUniforms(
+                    viewportWidth: Float(view.drawableSize.width),
+                    viewportHeight: Float(view.drawableSize.height),
+                    pitch: Float(settings.pitch),
+                    angleDeg: Float(settings.angleDeg),
+                    offset: Float(settings.offset),
+                    guardPct: Float(settings.guardPct),
+                    swapEyes: settings.swapEyes ? 1.0 : 0.0,
+                    orientHoriz: settings.orientHoriz ? 1.0 : 0.0,
+                    ultraZoom: Float(settings.ultraZoom),
+                    convergeX: Float(settings.convergeX),
+                    alignY: Float(settings.alignY),
+                    viewMode: Float(settings.viewMode),
+                    wideAspect: wAspect,
+                    ultraAspect: uAspect,
+                    aspectFitMode: settings.aspectFit ? 1.0 : 0.0
+                )
+
+                enc.setRenderPipelineState(pipelineState)
+                enc.setFragmentTexture(wideTex, index: 0)
+                enc.setFragmentTexture(ultraTex, index: 1)
+                enc.setFragmentBytes(&uniforms, length: MemoryLayout<LenticularUniforms>.stride, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
                 enc.endEncoding()
-                return
             }
 
-            let dSize = view.drawableSize
-            var uniforms = LenticularUniforms(
-                viewportWidth: Float(max(1.0, dSize.width)),
-                viewportHeight: Float(max(1.0, dSize.height)),
-                pitch: settings.pitch,
-                angleDeg: settings.angleDeg,
-                offset: settings.offset,
-                guardPct: settings.guardPct,
-                swapEyes: settings.swapEyes ? 1.0 : 0.0,
-                orientHoriz: settings.orientHoriz ? 1.0 : 0.0,
-                ultraZoom: settings.ultraZoom,
-                convergeX: settings.convergeX,
-                alignY: settings.alignY,
-                viewMode: Float(settings.viewMode),
-                wideAspect: wideAspect,
-                ultraAspect: ultraAspect
-            )
+            // 2. Passe de gravação de vídeo 3D (Espacial SBS ou Anáglifo Dubois em 1920x1080 @ 30 fps)
+            var recordedBuffer: CVPixelBuffer?
+            if recorder.isRecording {
+                let now = CACurrentMediaTime()
+                if now - lastRecordTime >= (1.0 / 30.0) {
+                    if let pb = recorder.allocateFrameBuffer(),
+                       let recTex = makeTexture(from: pb, cache: textureCache) {
+                        lastRecordTime = now
+                        recordedBuffer = pb
 
-            enc.setRenderPipelineState(pipeline)
-            enc.setFragmentTexture(tW, index: 0)
-            enc.setFragmentTexture(tU, index: 1)
-            enc.setFragmentBytes(&uniforms, length: MemoryLayout<LenticularUniforms>.stride, index: 0)
-            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            enc.endEncoding()
+                        let recPass = MTLRenderPassDescriptor()
+                        recPass.colorAttachments[0].texture = recTex
+                        recPass.colorAttachments[0].loadAction = .clear
+                        recPass.colorAttachments[0].storeAction = .store
+                        recPass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+
+                        if let recEnc = cmd.makeRenderCommandEncoder(descriptor: recPass) {
+                            var recUniforms = LenticularUniforms(
+                                viewportWidth: Float(recTex.width),
+                                viewportHeight: Float(recTex.height),
+                                pitch: Float(settings.pitch),
+                                angleDeg: Float(settings.angleDeg),
+                                offset: Float(settings.offset),
+                                guardPct: Float(settings.guardPct),
+                                swapEyes: settings.swapEyes ? 1.0 : 0.0,
+                                orientHoriz: settings.orientHoriz ? 1.0 : 0.0,
+                                ultraZoom: Float(settings.ultraZoom),
+                                convergeX: Float(settings.convergeX),
+                                alignY: Float(settings.alignY),
+                                viewMode: (settings.recordFormat == 0) ? 1.0 : 2.0,
+                                wideAspect: wAspect,
+                                ultraAspect: uAspect,
+                                aspectFitMode: 1.0
+                            )
+
+                            recEnc.setRenderPipelineState(pipelineState)
+                            recEnc.setFragmentTexture(wideTex, index: 0)
+                            recEnc.setFragmentTexture(ultraTex, index: 1)
+                            recEnc.setFragmentBytes(&recUniforms, length: MemoryLayout<LenticularUniforms>.stride, index: 0)
+                            recEnc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                            recEnc.endEncoding()
+                        }
+                    }
+                }
+            }
+
+            if let pbToAppend = recordedBuffer {
+                let recRef = self.recorder
+                cmd.addCompletedHandler { _ in
+                    recRef.appendRenderedFrame(pbToAppend)
+                }
+            }
 
             cmd.present(drawable)
             cmd.commit()
+        }
+
+        private func makeTexture(from pixelBuffer: CVPixelBuffer, cache: CVMetalTextureCache) -> MTLTexture? {
+            let width = CVPixelBufferGetWidth(pixelBuffer)
+            let height = CVPixelBufferGetHeight(pixelBuffer)
+            var cvTexOut: CVMetalTexture?
+            let status = CVMetalTextureCacheCreateTextureFromImage(
+                kCFAllocatorDefault,
+                cache,
+                pixelBuffer,
+                nil,
+                .bgra8Unorm,
+                width,
+                height,
+                0,
+                &cvTexOut
+            )
+            guard status == kCVReturnSuccess, let cvTex = cvTexOut else { return nil }
+            return CVMetalTextureGetTexture(cvTex)
         }
     }
 }

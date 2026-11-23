@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 final class CalibrationSettings: ObservableObject {
-    private static let storageKey = "camera_espacial_3d_settings_v1"
+    private static let storageKey = "camera_espacial_3d_settings_v2"
 
     struct Stored: Codable {
         var pitch: Float
@@ -15,6 +15,8 @@ final class CalibrationSettings: ObservableObject {
         var convergeX: Float
         var alignY: Float
         var viewMode: Int
+        var aspectFit: Bool
+        var recordFormat: Int
     }
 
     private var isLoading = false
@@ -29,8 +31,12 @@ final class CalibrationSettings: ObservableObject {
     @Published var ultraZoom: Float = 1.92 { didSet { save() } }
     @Published var convergeX: Float = 0.0 { didSet { save() } }
     @Published var alignY: Float = 0.0 { didSet { save() } }
-    // 0 = Lenticular 3D, 1 = SBS, 2 = Anaglifo
+    // 0 = Lenticular 3D, 1 = SBS, 2 = Anaglifo Dubois
     @Published var viewMode: Int = 0 { didSet { save() } }
+    // true = Proporcao Original da camera (sem cortar/esticar), false = Preencher Tela
+    @Published var aspectFit: Bool = true { didSet { save() } }
+    // 0 = Gravar Espacial 3D (SBS), 1 = Gravar Anaglifo Dubois
+    @Published var recordFormat: Int = 0 { didSet { save() } }
 
     init() {
         load()
@@ -48,6 +54,8 @@ final class CalibrationSettings: ObservableObject {
         convergeX = 0.0
         alignY = 0.0
         viewMode = 0
+        aspectFit = true
+        recordFormat = 0
         isLoading = false
         save()
     }
@@ -68,6 +76,8 @@ final class CalibrationSettings: ObservableObject {
         convergeX = decoded.convergeX
         alignY = decoded.alignY
         viewMode = decoded.viewMode
+        aspectFit = decoded.aspectFit
+        recordFormat = decoded.recordFormat
         isLoading = false
     }
 
@@ -83,7 +93,9 @@ final class CalibrationSettings: ObservableObject {
             ultraZoom: ultraZoom,
             convergeX: convergeX,
             alignY: alignY,
-            viewMode: viewMode
+            viewMode: viewMode,
+            aspectFit: aspectFit,
+            recordFormat: recordFormat
         )
         if let data = try? JSONEncoder().encode(s) {
             UserDefaults.standard.set(data, forKey: Self.storageKey)

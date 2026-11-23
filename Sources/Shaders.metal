@@ -16,6 +16,7 @@ struct LenticularUniforms {
     float viewMode;
     float wideAspect;
     float ultraAspect;
+    float aspectFitMode;
 };
 
 struct VertexOut {
@@ -37,18 +38,29 @@ vertex VertexOut vertex_fullscreen(uint vid [[vertex_id]]) {
     return out;
 }
 
-static inline float2 fitAspectUV(float2 uv, float targetAspect, float texAspect) {
+static inline float2 mapCameraUV(float2 uv, float targetAspect, float texAspect, bool fitMode) {
     float2 c = uv - 0.5;
-    if (texAspect > targetAspect) {
-        c.x *= targetAspect / texAspect;
+    if (fitMode) {
+        // Proporcao Original (Aspect-Fit / Conter): mostra 100% da imagem sem cortar e sem esticar
+        if (targetAspect > texAspect) {
+            c.x *= targetAspect / texAspect;
+        } else {
+            c.y *= texAspect / targetAspect;
+        }
     } else {
-        c.y *= texAspect / targetAspect;
+        // Preencher Tela (Aspect-Fill): preenche toda a area sem esticar
+        if (texAspect > targetAspect) {
+            c.x *= targetAspect / texAspect;
+        } else {
+            c.y *= texAspect / targetAspect;
+        }
     }
     return c + 0.5;
 }
 
 static inline float4 sampleWide(texture2d<float> tex, sampler s, float2 uv, float targetAspect, constant LenticularUniforms &u) {
-    float2 wuv = fitAspectUV(uv, targetAspect, max(0.1, u.wideAspect));
+    bool fitMode = (u.aspectFitMode > 0.5);
+    float2 wuv = mapCameraUV(uv, targetAspect, max(0.1, u.wideAspect), fitMode);
     wuv.x += u.convergeX * 0.5;
     if (wuv.x < 0.0 || wuv.x > 1.0 || wuv.y < 0.0 || wuv.y > 1.0) {
         return float4(0.0, 0.0, 0.0, 1.0);
@@ -57,7 +69,8 @@ static inline float4 sampleWide(texture2d<float> tex, sampler s, float2 uv, floa
 }
 
 static inline float4 sampleUltra(texture2d<float> tex, sampler s, float2 uv, float targetAspect, constant LenticularUniforms &u) {
-    float2 uuv = fitAspectUV(uv, targetAspect, max(0.1, u.ultraAspect));
+    bool fitMode = (u.aspectFitMode > 0.5);
+    float2 uuv = mapCameraUV(uv, targetAspect, max(0.1, u.ultraAspect), fitMode);
     uuv = (uuv - 0.5) / max(1.0, u.ultraZoom) + 0.5;
     uuv.x -= u.convergeX * 0.5;
     uuv.y += u.alignY;
@@ -65,6 +78,14 @@ static inline float4 sampleUltra(texture2d<float> tex, sampler s, float2 uv, flo
         return float4(0.0, 0.0, 0.0, 1.0);
     }
     return tex.sample(s, uuv);
+}
+
+// Matriz oficial Anaglifo Dubois (Red-Cyan)
+static inline float4 applyDuboisAnaglyph(float3 L, float3 R) {
+    float outR = dot(L, float3( 0.456100,  0.500484,  0.176381)) + dot(R, float3(-0.0434706, -0.0879388, -0.00155529));
+    float outG = dot(L, float3(-0.0400822, -0.0378246, -0.0157589)) + dot(R, float3( 0.378476,   0.733640,  -0.0184503));
+    float outB = dot(L, float3(-0.0152161, -0.0205971, -0.00546856)) + dot(R, float3(-0.0721527, -0.112961,   1.226400));
+    return float4(clamp(float3(outR, outG, outB), 0.0, 1.0), 1.0);
 }
 
 fragment float4 fragment_lenticular(VertexOut in [[stage_in]],
@@ -75,7 +96,7 @@ fragment float4 fragment_lenticular(VertexOut in [[stage_in]],
 
     float screenAspect = max(0.1, u.viewportWidth / max(1.0, u.viewportHeight));
 
-    // Modo 1: Side-by-Side (SBS)
+    // Modo 1: Espacial Side-by-Side (SBS 3D)
     if (u.viewMode > 0.5 && u.viewMode < 1.5) {
         float targetAspect = screenAspect * 0.5;
         bool isRightHalf = in.uv.x >= 0.5;
@@ -87,13 +108,13 @@ fragment float4 fragment_lenticular(VertexOut in [[stage_in]],
             : sampleWide(texWide, linSamp, subUV, targetAspect, u);
     }
 
-    // Modo 2: Anaglifo Vermelho/Ciano para conferir alinhamento sem a folha
+    // Modo 2: Anaglifo Dubois (Red-Cyan) ao vivo e na gravacao
     if (u.viewMode >= 1.5) {
         float4 colW = sampleWide(texWide, linSamp, in.uv, screenAspect, u);
         float4 colU = sampleUltra(texUltra, linSamp, in.uv, screenAspect, u);
-        float4 leftCol = (u.swapEyes > 0.5) ? colU : colW;
-        float4 rightCol = (u.swapEyes > 0.5) ? colW : colU;
-        return float4(leftCol.r, rightCol.g, rightCol.b, 1.0);
+        float3 leftRGB = (u.swapEyes > 0.5) ? colU.rgb : colW.rgb;
+        float3 rightRGB = (u.swapEyes > 0.5) ? colW.rgb : colU.rgb;
+        return applyDuboisAnaglyph(leftRGB, rightRGB);
     }
 
     // Modo 0: 3D Lenticular calibrado em pixels fisicos

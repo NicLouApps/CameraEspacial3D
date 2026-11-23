@@ -83,12 +83,19 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
     }
 
     private func configureAndRun() {
+        // Obtem orientacao atual da interface na Main Thread antes de configurar conexoes
+        var initialAngle: CGFloat = 90
+        DispatchQueue.main.sync {
+            initialAngle = Self.currentRotationAngle()
+        }
+
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             if self.isConfigured {
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
+                self.applyCurrentRotation()
                 DispatchQueue.main.async {
                     self.status = .running
                 }
@@ -163,6 +170,9 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                     let conn = AVCaptureConnection(inputPorts: [widePort], output: self.wideOutput)
                     if self.session.canAddConnection(conn) {
                         self.session.addConnection(conn)
+                        if conn.isVideoRotationAngleSupported(initialAngle) {
+                            conn.videoRotationAngle = initialAngle
+                        }
                         self.wideConnection = conn
                     } else {
                         configOk = false
@@ -179,6 +189,9 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                     let conn = AVCaptureConnection(inputPorts: [ultraPort], output: self.ultraOutput)
                     if self.session.canAddConnection(conn) {
                         self.session.addConnection(conn)
+                        if conn.isVideoRotationAngleSupported(initialAngle) {
+                            conn.videoRotationAngle = initialAngle
+                        }
                         self.ultraConnection = conn
                     } else {
                         configOk = false
@@ -205,8 +218,8 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
             }
 
             self.isConfigured = true
-            self.applyCurrentRotation()
             self.session.startRunning()
+            self.applyCurrentRotation()
             DispatchQueue.main.async {
                 self.status = .running
             }
@@ -223,13 +236,10 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
             return is420 && dims.width <= 1920 && dims.height <= 1080
         }
 
-        // Prefere 1920x1080 ou 1280x720 com pelo menos 30 fps
         let best = candidates.max { a, b in
             let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
             let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
-            let pa = da.width * da.height
-            let pb = db.width * db.height
-            return pa < pb
+            return (da.width * da.height) < (db.width * db.height)
         }
 
         guard let format = best else { return }
@@ -242,8 +252,26 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
                 device.activeVideoMaxFrameDuration = targetFps
             }
             device.unlockForConfiguration()
-        } catch {
-            // Mantem formato padrao caso lock falhe
+        } catch {}
+    }
+
+    private static func currentRotationAngle() -> CGFloat {
+        let ifaceOrientation: UIInterfaceOrientation
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            ifaceOrientation = scene.effectiveGeometry.interfaceOrientation
+        } else {
+            ifaceOrientation = .portrait
+        }
+
+        switch ifaceOrientation {
+        case .landscapeLeft:
+            return 180
+        case .landscapeRight:
+            return 0
+        case .portraitUpsideDown:
+            return 270
+        default:
+            return 90
         }
     }
 
@@ -254,25 +282,7 @@ final class SpatialCameraManager: NSObject, ObservableObject, AVCaptureVideoData
     func applyCurrentRotation() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            let ifaceOrientation: UIInterfaceOrientation
-            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                ifaceOrientation = scene.effectiveGeometry.interfaceOrientation
-            } else {
-                ifaceOrientation = .portrait
-            }
-
-            let angle: CGFloat
-            switch ifaceOrientation {
-            case .landscapeLeft:
-                angle = 180
-            case .landscapeRight:
-                angle = 0
-            case .portraitUpsideDown:
-                angle = 270
-            default:
-                angle = 90
-            }
-
+            let angle = Self.currentRotationAngle()
             self.sessionQueue.async {
                 if let wc = self.wideConnection, wc.isVideoRotationAngleSupported(angle) {
                     wc.videoRotationAngle = angle
