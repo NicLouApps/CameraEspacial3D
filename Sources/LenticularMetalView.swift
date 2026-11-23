@@ -93,7 +93,7 @@ struct LenticularMetalView: UIViewRepresentable {
                   let commandQueue = commandQueue,
                   let textureCache = textureCache else { return }
 
-            let pair = cameraManager.copyLatestStereoPair()
+            let pair = cameraManager.currentBuffers()
             guard let wideBuf = pair.wide, let ultraBuf = pair.ultra else { return }
 
             guard let wideTex = makeTexture(from: wideBuf, cache: textureCache),

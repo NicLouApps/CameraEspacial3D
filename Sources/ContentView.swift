@@ -150,7 +150,7 @@ struct ContentView: View {
                         .foregroundColor(.cyan)
                     Spacer()
                     Button("RESET 75 LPI") {
-                        settings.resetToIphone16ProMax75LPI()
+                        settings.resetDefaults()
                     }
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(.orange)
@@ -309,9 +309,9 @@ struct ContentView: View {
 
     private func sliderRow(
         title: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double,
+        value: Binding<Float>,
+        range: ClosedRange<Float>,
+        step: Float,
         format: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
